@@ -1,4 +1,5 @@
 import os
+import time
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
@@ -59,14 +60,43 @@ class RAGService:
             self.vector_store = FAISS.from_documents([Document(page_content="No context available.", metadata={"source": "none"})], self.embeddings)
             return
 
-        # Create Vector Store
-        self.vector_store = FAISS.from_documents(documents, self.embeddings)
-        self.qa_chain = RetrievalQA.from_chain_type(
-            llm=self.llm,
-            chain_type="stuff",
-            retriever=self.vector_store.as_retriever()
-        )
-        print("PDF Ingestion Complete. Vector Store Ready.")
+        # Create Vector Store with Batch Processing (Aggressive Batching for Stability)
+        print(f"Total documents to embed: {len(documents)}")
+        batch_size = 1 # Embed one by one to avoid 504 Timeouts
+        self.vector_store = None
+        
+        for i in range(0, len(documents), batch_size):
+            batch = documents[i : i + batch_size]
+            print(f"Embedding batch {i // batch_size + 1}/{(len(documents) + batch_size - 1) // batch_size} ({len(batch)} docs)...")
+            
+            # Retry logic
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    if self.vector_store is None:
+                        self.vector_store = FAISS.from_documents(batch, self.embeddings)
+                    else:
+                        self.vector_store.add_documents(batch)
+                    time.sleep(2.0) # Significant delay to respect rate limits
+                    break # Success, exit retry loop
+                except Exception as e:
+                    print(f"Error embedding batch {i} (Attempt {attempt+1}/{max_retries}): {e}")
+                    if attempt < max_retries - 1:
+                        wait_time = 2 ** (attempt + 1)
+                        print(f"Retrying in {wait_time} seconds...")
+                        time.sleep(wait_time)
+                    else:
+                        print(f"Failed to embed batch {i} after {max_retries} attempts. Skipping.")
+        
+        if self.vector_store is None:
+             # Fallback if all batches failed
+             print("Failed to initialize vector store from documents. Creating empty store.")
+             try:
+                self.vector_store = FAISS.from_documents([Document(page_content="No context available.", metadata={"source": "none"})], self.embeddings)
+             except Exception as e:
+                 print(f"CRITICAL: Could not create fallback vector store: {e}")
+                 # Initialize empty to prevent crash, though it won't work for retrieval
+                 self.vector_store = None # Or handle more gracefully depending on library support
 
     def get_answer(self, query: str) -> str:
         """Retrieves answer from RAG chain."""

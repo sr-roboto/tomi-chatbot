@@ -3,9 +3,10 @@ services:
     build: ./server
     ports:
       - "8000:8000"
+    env_file:
+      - ./server/.env
     environment:
       - HOST=0.0.0.0
-      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
 
   client:
     build: ./client
