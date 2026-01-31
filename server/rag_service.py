@@ -1,5 +1,6 @@
 import os
 import time
+import gc
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.vectorstores import FAISS
@@ -33,70 +34,97 @@ class RAGService:
         
         # Initialize LLM
         self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=self.api_key, temperature=0.3)
+        self.index_path = "faiss_index"
 
     def ingest_pdfs(self, directory_path: str):
         """Loads all PDFs from the directory and creates a vector store."""
+        print(f"Checking for existing vector store at {self.index_path}...")
+        if os.path.exists(self.index_path):
+            try:
+                self.vector_store = FAISS.load_local(self.index_path, self.embeddings, allow_dangerous_deserialization=True)
+                print("Loaded existing vector store from disk.")
+                self._setup_qa_chain()
+                return
+            except Exception as e:
+                print(f"Error loading existing index: {e}. Re-ingesting.")
+
         print(f"Ingesting PDFs from {directory_path}...")
-        documents = []
         
         if not os.path.exists(directory_path):
              print(f"Directory {directory_path} does not exist.")
              return
 
-        for filename in os.listdir(directory_path):
-            if filename.endswith(".pdf"):
-                file_path = os.path.join(directory_path, filename)
-                try:
-                    loader = PyPDFLoader(file_path)
-                    docs = loader.load_and_split()
-                    documents.extend(docs)
-                    print(f"Loaded {filename}: {len(docs)} pages.")
-                except Exception as e:
-                    print(f"Error loading {filename}: {e}")
-
-        if not documents:
-            print("No PDF documents found or loaded.")
-            # Create an empty vector store to avoid errors
-            self.vector_store = FAISS.from_documents([Document(page_content="No context available.", metadata={"source": "none"})], self.embeddings)
-            return
-
-        # Create Vector Store with Batch Processing (Aggressive Batching for Stability)
-        print(f"Total documents to embed: {len(documents)}")
-        batch_size = 1 # Embed one by one to avoid 504 Timeouts
         self.vector_store = None
-        
-        for i in range(0, len(documents), batch_size):
-            batch = documents[i : i + batch_size]
-            print(f"Embedding batch {i // batch_size + 1}/{(len(documents) + batch_size - 1) // batch_size} ({len(batch)} docs)...")
+        files = [f for f in os.listdir(directory_path) if f.endswith(".pdf")]
+        total_files = len(files)
+        print(f"Found {total_files} PDF files to process.")
+
+        for index, filename in enumerate(files):
+            file_path = os.path.join(directory_path, filename)
+            print(f"Processing file {index + 1}/{total_files}: {filename}...")
             
-            # Retry logic
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    if self.vector_store is None:
-                        self.vector_store = FAISS.from_documents(batch, self.embeddings)
-                    else:
-                        self.vector_store.add_documents(batch)
-                    time.sleep(2.0) # Significant delay to respect rate limits
-                    break # Success, exit retry loop
-                except Exception as e:
-                    print(f"Error embedding batch {i} (Attempt {attempt+1}/{max_retries}): {e}")
-                    if attempt < max_retries - 1:
-                        wait_time = 2 ** (attempt + 1)
-                        print(f"Retrying in {wait_time} seconds...")
-                        time.sleep(wait_time)
-                    else:
-                        print(f"Failed to embed batch {i} after {max_retries} attempts. Skipping.")
+            try:
+                # Load ONLY this file
+                loader = PyPDFLoader(file_path)
+                docs = loader.load_and_split()
+                
+                if not docs:
+                    print(f"Warning: No text found in {filename}")
+                    continue
+
+                # Add to Vector Store immediately
+                if self.vector_store is None:
+                    self.vector_store = FAISS.from_documents(docs, self.embeddings)
+                else:
+                    self.vector_store.add_documents(docs)
+                
+                print(f"Successfully embedded {filename} ({len(docs)} pages).")
+                
+                # Cleanup to free memory
+                del docs
+                del loader
+                gc.collect()
+
+            except Exception as e:
+                print(f"Error processing {filename}: {e}")
         
         if self.vector_store is None:
-             # Fallback if all batches failed
              print("Failed to initialize vector store from documents. Creating empty store.")
-             try:
-                self.vector_store = FAISS.from_documents([Document(page_content="No context available.", metadata={"source": "none"})], self.embeddings)
-             except Exception as e:
-                 print(f"CRITICAL: Could not create fallback vector store: {e}")
-                 # Initialize empty to prevent crash, though it won't work for retrieval
-                 self.vector_store = None # Or handle more gracefully depending on library support
+             self.vector_store = FAISS.from_documents([Document(page_content="No context available.", metadata={"source": "none"})], self.embeddings)
+        else:
+            try:
+                self.vector_store.save_local(self.index_path)
+                print(f"Vector store saved to {self.index_path}")
+            except Exception as e:
+                print(f"Error saving vector store: {e}")
+
+        self._setup_qa_chain()
+
+    def _setup_qa_chain(self):
+        # Custom Prompt Template
+        template = """Sos un experto Asistente Pedagógico especializado en el uso de Pantallas Táctiles Interactivas en el aula. 
+        Tu misión es ayudar a los docentes a integrar esta tecnología en sus clases.
+        
+        Usa el siguiente contexto para responder la pregunta. Si la respuesta no está en el contexto, usa tu conocimiento general 
+        sobre pedagogía y tecnología educativa para dar una respuesta útil y motivadora. SIEMPRE respondé en español.
+
+        Contexto: {context}
+
+        Pregunta: {question}
+
+        Respuesta:"""
+        QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
+
+        if self.vector_store:
+            self.qa_chain = RetrievalQA.from_chain_type(
+                llm=self.llm,
+                chain_type="stuff",
+                retriever=self.vector_store.as_retriever(),
+                chain_type_kwargs={"prompt": QA_CHAIN_PROMPT}
+            )
+            print("PDF Ingestion Complete. Vector Store Ready.")
+        else:
+            print("Vector Store not available. QA Chain skipped.")
 
     def get_answer(self, query: str) -> str:
         """Retrieves answer from RAG chain."""
