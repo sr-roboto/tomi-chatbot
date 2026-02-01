@@ -2,14 +2,15 @@ import os
 import time
 import gc
 from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.embeddings import OllamaEmbeddings
 from langchain_community.chat_models import ChatOllama
+from langchain_openai import ChatOpenAI
 # Add back Google imports for Hybrid support
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from langchain.docstore.document import Document
-from langchain.prompts import PromptTemplate # Fixed: Added missing import
+from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -26,12 +27,17 @@ class RAGService:
 
     def _initialize(self):
         # Determine Provider
-        self.provider = os.getenv("AI_PROVIDER", "ollama").lower()
+        self.provider = os.getenv("AI_PROVIDER", "gemini").lower()
         print(f"-------- RAG SERVICE INITIALIZING --------")
         print(f"Active Provider: {self.provider.upper()}")
         
         self.vector_store = None
         self.qa_chain = None
+
+        # --- UNIVERSAL EMBEDDINGS (FastEmbed) ---
+        # We use FastEmbed for EVERY provider to avoid rate limits and keep it fast/light.
+        print("Initializing FastEmbed (Lightweight CPU Embeddings)...")
+        self.embeddings = FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")
 
         if self.provider == "gemini":
             # --- GOOGLE GEMINI CONFIGURATION ---
@@ -39,33 +45,67 @@ class RAGService:
             if not self.api_key:
                 print("CRITICAL WARNING: GOOGLE_API_KEY not found. Gemini will fail.")
             
-            # Using original Gemini settings
-            self.embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=self.api_key)
-            self.llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash", google_api_key=self.api_key, temperature=0.3)
-            # Separate index path to avoid compatibility crash
-            self.index_path = "faiss_index_gemini"
-            
-        else:
-            # --- OLLAMA LOCAL CONFIGURATION (Default) ---
-            self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
-            print(f"Connecting to Ollama at {self.ollama_base_url}")
-            
-            self.embedding_model = "nomic-embed-text" 
-            self.llm_model = "llama3.2:1b"
+            print("Using Google Gemini (LLM)...")
+            self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=self.api_key, temperature=0.3)
+            self.index_path = "faiss_index_gemini_fastembed"
 
-            self.embeddings = OllamaEmbeddings(
-                base_url=self.ollama_base_url,
-                model=self.embedding_model
+        elif self.provider == "deepseek":
+            # (DeepSeek logic kept as backup)
+            self.api_key = os.getenv("DEEPSEEK_API_KEY")
+            print("Using DeepSeek API (LLM)...")
+            self.llm = ChatOpenAI(
+                model='deepseek-chat', 
+                openai_api_key=self.api_key, 
+                openai_api_base='https://api.deepseek.com',
+                max_tokens=1024
             )
-            
-            self.llm = ChatOllama(
-                base_url=self.ollama_base_url,
-                model=self.llm_model,
-                temperature=0.3
-            )
-            # Separate index path for Ollama
-            self.index_path = "faiss_index_ollama"
-            
+            self.index_path = "faiss_index_deepseek_fastembed"
+        
+        elif self.provider == "ollama":
+             # --- OLLAMA LOCAL CONFIGURATION ---
+             self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+             print(f"Connecting to Ollama at {self.ollama_base_url}")
+             
+             # Smartest/Fastest balance: Llama 3.2 (3B)
+             self.llm_model = "llama3.2" 
+             
+             # Attempt to pull the model if not exists (Basic check)
+             try:
+                 import requests
+                 print(f"Checking if model {self.llm_model} is available locally...")
+                 # Check if model exists first to avoid unnecessary pull
+                 tags_response = requests.get(f"{self.ollama_base_url}/api/tags", timeout=3)
+                 
+                 model_exists = False
+                 if tags_response.status_code == 200:
+                    models = [m['name'] for m in tags_response.json().get('models', [])]
+                    # Check for partial match (e.g. llama3.2:latest)
+                    if any(self.llm_model in m for m in models):
+                        print(f"Model {self.llm_model} found locally. Skipping download.")
+                        model_exists = True
+                 
+                 if not model_exists:
+                     print(f"Model {self.llm_model} not found. Triggering pull (this may take a while)...")
+                     # Use a short timeout for the request setup, but let the pull happen in background or warn user
+                     # We verify connection but don't block forever if possible, or we assume user will pull it.
+                     requests.post(f"{self.ollama_base_url}/api/pull", json={"name": self.llm_model}, timeout=10)
+                     
+             except Exception as e:
+                 print(f"Warning: Could not verify/pull model: {e}")
+                 print("If you are using a local Ollama, make sure OLLAMA_HOST=0.0.0.0 is set!")
+
+             self.llm = ChatOllama(
+                 base_url=self.ollama_base_url,
+                 model=self.llm_model,
+                 temperature=0.3
+             )
+             self.index_path = "faiss_index_ollama_fastembed" # Separate index for Ollama-FastEmbed combo
+        
+        else:
+             # Fallback
+             print("Warning: Unknown provider.")
+             self.index_path = "faiss_index_unknown"
+
         print(f"Vector Store Path: {self.index_path}")
         print(f"------------------------------------------")
 

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader2, Mic, Volume2, VolumeX, StopCircle } from 'lucide-react';
+import { Send, Bot, User, Loader2, Mic, Volume2, VolumeX, StopCircle, History, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -13,6 +13,45 @@ import remarkGfm from 'remark-gfm';
 interface Message {
     role: 'user' | 'assistant';
     content: string;
+}
+
+// Speech Recognition Types
+interface SpeechRecognitionEvent {
+    results: {
+        [index: number]: {
+            [index: number]: {
+                transcript: string;
+            };
+        };
+    };
+}
+
+interface SpeechRecognitionErrorEvent {
+    error: string;
+}
+
+interface SpeechRecognition extends EventTarget {
+    lang: string;
+    continuous: boolean;
+    interimResults: boolean;
+    start: () => void;
+    stop: () => void;
+    abort: () => void;
+    onstart: ((this: SpeechRecognition, ev: Event) => any) | null;
+    onend: ((this: SpeechRecognition, ev: Event) => any) | null;
+    onresult: ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => any) | null;
+    onerror: ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => any) | null;
+}
+
+declare global {
+    interface Window {
+        SpeechRecognition: {
+            new(): SpeechRecognition;
+        };
+        webkitSpeechRecognition: {
+            new(): SpeechRecognition;
+        };
+    }
 }
 
 type RobotState = 'idle' | 'listening' | 'thinking' | 'speaking';
@@ -50,10 +89,9 @@ const ThinkingRobot = ({ state }: { state: RobotState }) => {
                 alt="Tomi Avatar"
                 className="w-full h-full object-contain drop-shadow-2xl relative z-10 transition-all duration-300"
             />
+            {/* Subtle glow effect instead of spinner */}
             {state === 'thinking' && (
-                <div className="absolute top-[0%] right-[30%] z-20 bg-white/90 p-2 rounded-full shadow-lg animate-bounce">
-                    <Loader2 size={32} className="text-blue-500 animate-spin" />
-                </div>
+                <div className="absolute inset-0 bg-blue-500/20 rounded-full blur-xl animate-pulse z-0 mix-blend-screen" />
             )}
         </div>
     );
@@ -82,6 +120,8 @@ const AIChat = () => {
     ]);
     const [input, setInput] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [showHistory, setShowHistory] = useState(false);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
 
     const [isListening, setIsListening] = useState(false);
     const [isMuted, setIsMuted] = useState(false);
@@ -91,67 +131,88 @@ const AIChat = () => {
 
     const [subtitle, setSubtitle] = useState('');
 
+    const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+    const [manualVoice, setManualVoice] = useState<SpeechSynthesisVoice | null>(null);
+
+    useEffect(() => {
+        const loadVoices = () => {
+            const available = window.speechSynthesis.getVoices();
+            setVoices(available);
+        };
+
+        loadVoices();
+
+        // Chrome loads voices asynchronously
+        window.speechSynthesis.onvoiceschanged = loadVoices;
+
+        return () => {
+            window.speechSynthesis.onvoiceschanged = null;
+        };
+    }, []);
+
     const speakText = (text: string) => {
-        if (isMuted || !window.speechSynthesis) return;
+        if (isMuted) return;
 
-        // Cancel any current speech
-        window.speechSynthesis.cancel();
+        stopSpeaking(); // Cancel current
 
-        const cleanText = cleanTextForSpeech(text);
-        const utterance = new SpeechSynthesisUtterance(cleanText);
-        utterance.lang = 'es-ES';
-        // Select a good voice if available (optional)
-        const voices = window.speechSynthesis.getVoices();
-        const preferredVoice = voices.find(v => v.lang.includes('es') && v.name.includes('Google')) || voices.find(v => v.lang.includes('es'));
-        if (preferredVoice) utterance.voice = preferredVoice;
-
-        utterance.onstart = () => {
+        try {
             setIsSpeaking(true);
-            setSubtitle(""); // Start empty or with first chunk
-        };
+            const cleanText = cleanTextForSpeech(text);
+            setSubtitle(cleanText);
 
-        utterance.onboundary = (event) => {
-            if (event.name === 'word' || event.name === 'sentence') {
-                const charIndex = event.charIndex;
-                const text = utterance.text;
-                const delimiters = ['.', '?', '!', '\n', ',', ';', ':', '—'];
+            const utterance = new SpeechSynthesisUtterance(cleanText);
 
-                // Find start of current chunk
-                let start = 0;
-                for (let i = charIndex - 1; i >= 0; i--) {
-                    if (delimiters.includes(text[i])) {
-                        start = i + 1;
-                        break;
-                    }
-                }
+            // Voice Selection Logic: Prefer Manual -> Spanish Male -> Spanish Google -> Spanish
+            // Common male voices names: "Pablo", "David", "Male", "hombre"
+            let selectedVoice: SpeechSynthesisVoice | null | undefined = manualVoice;
 
-                // Find end of current chunk
-                let end = text.length;
-                for (let i = charIndex; i < text.length; i++) {
-                    if (delimiters.includes(text[i])) {
-                        // Include the delimiter for valid sentence endings if it's not a comma/pause
-                        // But usually for subtitles we might want to just show the text. 
-                        // Let's include the delimiter to look natural.
-                        end = i + 1;
-                        break;
-                    }
-                }
-
-                const currentChunk = text.substring(start, end).trim();
-                // Avoid empty updates or single punctuation
-                if (currentChunk && currentChunk.length > 1) {
-                    setSubtitle(currentChunk);
-                }
+            if (!selectedVoice) {
+                selectedVoice = voices.find(v =>
+                    v.lang.toLowerCase().startsWith('es') &&
+                    (v.name.toLowerCase().includes('pablo') || v.name.toLowerCase().includes('male') || v.name.toLowerCase().includes('hombre'))
+                );
             }
-        };
 
-        utterance.onend = () => {
+            // Fallback 1: Google Spanish (usually female/neutral but high quality)
+            if (!selectedVoice) {
+                selectedVoice = voices.find(v => v.lang.toLowerCase().startsWith('es') && v.name.toLowerCase().includes('google'));
+            }
+
+            // Fallback 2: Any Spanish
+            if (!selectedVoice) {
+                selectedVoice = voices.find(v => v.lang.toLowerCase().startsWith('es'));
+            }
+
+            if (selectedVoice) {
+                utterance.voice = selectedVoice;
+                // If it's a male voice or we want to make it sound deeper/more masculine if generic:
+                // Slightly lower pitch can sound more masculine if it's a neutral voice
+                if (!selectedVoice.name.toLowerCase().includes('female')) {
+                    utterance.pitch = 0.9;
+                    utterance.rate = 1.0;
+                }
+            } else {
+                // Determine if we should warn? Maybe just default.
+                console.warn("No Spanish voice found.");
+            }
+
+            utterance.onend = () => {
+                setIsSpeaking(false);
+                setSubtitle('');
+            };
+
+            utterance.onerror = (e) => {
+                console.error("Browser TTS Error:", e);
+                setIsSpeaking(false);
+                setSubtitle('');
+            };
+
+            window.speechSynthesis.speak(utterance);
+
+        } catch (error) {
+            console.error("TTS Error:", error);
             setIsSpeaking(false);
-            setSubtitle(''); // Clear subtitle to show full text or nothing
-        };
-        utterance.onerror = () => setIsSpeaking(false);
-
-        window.speechSynthesis.speak(utterance);
+        }
     };
 
     const stopSpeaking = () => {
@@ -161,43 +222,69 @@ const AIChat = () => {
     };
 
     const scrollToBottom = () => {
-        // messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); // Removed as per new UI
+        if (showHistory) {
+            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }
     };
 
     useEffect(() => {
         scrollToBottom();
     }, [messages]);
 
+    // Voice Recognition Ref
+    const recognitionRef = useRef<SpeechRecognition | null>(null);
+
     const handleVoiceInput = () => {
+        // If already listening, stop it.
+        if (isListening) {
+            recognitionRef.current?.stop();
+            setIsListening(false);
+            return;
+        }
+
         if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-            // @ts-ignore
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             const recognition = new SpeechRecognition();
+            recognitionRef.current = recognition;
+
             recognition.lang = 'es-ES';
             recognition.continuous = false;
             recognition.interimResults = false;
 
-            recognition.onstart = () => setIsListening(true);
+            recognition.onstart = () => {
+                setIsListening(true);
+            };
 
-            recognition.onresult = (event: any) => {
+            recognition.onresult = (event: SpeechRecognitionEvent) => {
                 const transcript = event.results[0][0].transcript;
                 setInput(transcript);
                 setIsListening(false);
                 // Auto-submit for better voice experience
                 setTimeout(() => {
-                    // We call handle submit directly passing the transcript to ensure state is fresh if needed
                     triggerSubmit(transcript);
                 }, 500);
             };
 
-            recognition.onerror = (event: any) => {
+            recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
                 console.error("Speech recognition error", event.error);
                 setIsListening(false);
+                // Optional: Show a toast or small alert
+                if (event.error === 'not-allowed') {
+                    alert("Permiso de micrófono denegado.");
+                }
             };
 
-            recognition.onend = () => setIsListening(false);
+            recognition.onend = () => {
+                setIsListening(false);
+                recognitionRef.current = null;
+            };
 
-            recognition.start();
+            try {
+                recognition.start();
+            } catch (e) {
+                console.error("Error starting recognition:", e);
+                setIsListening(false);
+            }
         } else {
             alert("Tu navegador no soporta reconocimiento de voz.");
         }
@@ -227,7 +314,13 @@ const AIChat = () => {
 
         try {
             abortControllerRef.current = new AbortController();
-            const response = await fetch('http://localhost:8000/api/chat/stream', {
+
+            // Dynamic URL for mobile/external access
+            const protocol = window.location.protocol; // http: or https:
+            const hostname = window.location.hostname; // localhost or 192.168.x.x
+            const apiUrl = `${protocol}//${hostname}:8000/api/chat/stream`;
+
+            const response = await fetch(apiUrl, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ message: userMessage }),
@@ -287,37 +380,80 @@ const AIChat = () => {
     const displayText = isSpeaking ? subtitle : cleanTextForSpeech(latestAssistantMessage);
 
     return (
-        <div className="min-h-screen bg-slate-50 text-slate-900 font-sans flex flex-col overflow-hidden relative">
-            {/* Background Decor */}
+        <div className="min-h-screen font-sans flex flex-col overflow-hidden relative bg-slate-900 text-white">
+            {/* Dynamic Background */}
             <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-                <div className="absolute top-[10%] left-[10%] w-[30%] h-[30%] bg-blue-200/30 rounded-full blur-[80px]" />
-                <div className="absolute bottom-[10%] right-[10%] w-[30%] h-[30%] bg-green-200/30 rounded-full blur-[80px]" />
+                <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-indigo-900 via-slate-900 to-purple-900 animate-gradient-xy"></div>
+                <div className="absolute top-[20%] left-[10%] w-[500px] h-[500px] bg-blue-500/20 rounded-full blur-[120px] animate-pulse-slow mix-blend-screen" />
+                <div className="absolute bottom-[20%] right-[10%] w-[500px] h-[500px] bg-purple-500/20 rounded-full blur-[120px] animate-pulse-slow delay-1000 mix-blend-screen" />
+            </div>
+
+            {/* History Toggle Button (Top Right) */}
+            <div className="absolute top-4 right-4 z-50">
+                <button
+                    onClick={() => setShowHistory(!showHistory)}
+                    className="p-3 bg-white/10 backdrop-blur-md rounded-full text-white shadow-lg hover:bg-white/20 transition-all border border-white/10"
+                    title={showHistory ? "Ocultar historial" : "Ver historial"}
+                >
+                    {showHistory ? <X size={24} /> : <History size={24} />}
+                </button>
             </div>
 
             {/* Main Content: Avatar + Bubble */}
             <div className="relative z-10 flex-1 flex flex-col items-center justify-center p-4">
 
+                {/* History Overlay */}
+                <AnimatePresence>
+                    {showHistory && (
+                        <motion.div
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 20 }}
+                            className="absolute inset-0 z-40 bg-slate-900/90 backdrop-blur-xl p-6 overflow-y-auto flex flex-col gap-4"
+                        >
+                            {messages.map((msg, idx) => (
+                                <div key={idx} className={`flex ${msg.role === 'assistant' ? 'justify-start' : 'justify-end'}`}>
+                                    <div className={`max-w-[80%] p-4 rounded-2xl ${msg.role === 'assistant' ? 'bg-white/10 text-white' : 'bg-blue-600 text-white'}`}>
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                                    </div>
+                                </div>
+                            ))}
+                            <div ref={messagesEndRef} />
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+
+
                 {/* Robot Avatar Container */}
                 <div className="relative w-full max-w-[600px] aspect-4/5 flex items-center justify-center">
 
-                    {/* Speech Bubble Overlay */}
+                    {/* Speech Display - Adaptive: Subtitle (Mobile) vs Bubble (Desktop) */}
                     <AnimatePresence mode="wait">
-                        {displayText && (
+                        {(displayText || isLoading) && !showHistory && (
                             <motion.div
                                 key={isSpeaking ? 'subtitle' : 'fulltext'}
                                 initial={{ opacity: 0, y: 10, scale: 0.95 }}
                                 animate={{ opacity: 1, y: 0, scale: 1 }}
                                 exit={{ opacity: 0, scale: 0.95 }}
-                                className="absolute top-[10%] left-1/2 -translate-x-1/2 w-[90%] md:w-[80%] z-20"
+                                className="absolute z-20 w-full left-0 bottom-0 md:top-[5%] md:bottom-auto md:w-[90%] md:left-1/2 md:-translate-x-1/2"
                             >
-                                <div className="bg-slate-600 backdrop-blur-md text-white p-6 rounded-3xl shadow-xl border border-white/10 relative min-h-[100px] flex items-center justify-center text-center">
-                                    {/* Tail */}
-                                    <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 w-6 h-6 bg-slate-600 backdrop-blur-md rotate-45 border-r border-b border-white/10"></div>
+                                {/* Mobile Subtitle Style - REMOVED as per user request */}
+                                {/* The text is now hidden on mobile and only accessible via History */}
 
-                                    <div className="text-xl md:text-2xl font-medium leading-relaxed max-h-[200px] overflow-y-auto custom-scrollbar">
+                                {/* Desktop Bubble Style */}
+                                <div className="hidden md:flex bg-white/10 backdrop-blur-xl text-white p-6 rounded-[2rem] shadow-2xl border border-white/20 relative min-h-[120px] items-center justify-center text-center ring-1 ring-white/10">
+                                    {/* Tail */}
+                                    <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 w-6 h-6 bg-white/10 backdrop-blur-xl rotate-45 border-r border-b border-white/20"></div>
+
+                                    <div className="text-xl md:text-2xl font-light tracking-wide leading-relaxed max-h-[250px] overflow-y-auto custom-scrollbar pt-2 break-words w-full whitespace-pre-wrap">
                                         {displayText}
+                                        {/* Elegant loading indicator integrated into text flow */}
                                         {isLoading && !isSpeaking && (
-                                            <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-1 align-middle" />
+                                            <span className="inline-flex gap-1 ml-2 align-baseline">
+                                                <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce delay-0"></span>
+                                                <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce delay-100"></span>
+                                                <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce delay-200"></span>
+                                            </span>
                                         )}
                                     </div>
                                 </div>
@@ -326,7 +462,7 @@ const AIChat = () => {
                     </AnimatePresence>
 
                     {/* Robot Image */}
-                    <div className="w-[80%] h-[80%] relative mt-20">
+                    <div className="w-[85%] h-[85%] relative mt-0 md:mt-24 transition-all duration-300">
                         <ThinkingRobot state={isSpeaking ? 'speaking' : isLoading ? 'thinking' : isListening ? 'listening' : 'idle'} />
                     </div>
                 </div>
@@ -334,11 +470,11 @@ const AIChat = () => {
             </div>
 
             {/* Bottom Controls: Input & Mic */}
-            <div className="relative z-20 p-6 pb-8 bg-linear-to-t from-white via-white/80 to-transparent">
-                <div className="max-w-xl mx-auto space-y-4">
+            <div className="relative z-20 p-4 pb-6 md:p-6 md:pb-8 bg-gradient-to-t from-slate-900 via-slate-900/95 to-transparent">
+                <div className="max-w-xl mx-auto space-y-6">
 
                     {/* Floating Action Buttons */}
-                    <div className="flex justify-center gap-4">
+                    <div className="flex justify-center gap-4 items-center">
                         <button
                             onClick={() => {
                                 if (isSpeaking) {
@@ -347,38 +483,61 @@ const AIChat = () => {
                                     setIsMuted(!isMuted);
                                 }
                             }}
-                            className="bg-white hover:bg-slate-100 text-slate-700 p-3 rounded-full shadow-md border border-slate-200 transition-transform active:scale-95"
+                            className="bg-white/10 hover:bg-white/20 backdrop-blur-md text-white p-4 rounded-full shadow-lg border border-white/10 transition-all active:scale-95 group"
                             title={isMuted ? "Unmute" : "Mute"}
                         >
-                            {isSpeaking ? <StopCircle size={24} className="text-red-500" /> : (isMuted ? <VolumeX size={24} /> : <Volume2 size={24} />)}
+                            {isSpeaking ? <StopCircle size={24} className="text-red-400 group-hover:text-red-300" /> : (isMuted ? <VolumeX size={24} /> : <Volume2 size={24} />)}
                         </button>
+
+                        {/* Voice Selector */}
+                        {voices.length > 0 && (
+                            <div className="relative group">
+                                <select
+                                    onChange={(e) => {
+                                        const voice = voices.find(v => v.name === e.target.value);
+                                        setManualVoice(voice || null);
+                                    }}
+                                    className="appearance-none bg-white/10 hover:bg-white/20 backdrop-blur-md text-white py-3 pl-4 pr-10 rounded-full shadow-lg border border-white/10 outline-none focus:ring-2 focus:ring-blue-500/50 cursor-pointer text-sm font-light max-w-[200px] truncate"
+                                    value={manualVoice?.name || ""}
+                                >
+                                    {voices.filter(v => v.lang.toLowerCase().startsWith('es')).map(v => (
+                                        <option key={v.name} value={v.name} className="bg-slate-800 text-white">
+                                            {v.name.replace("Microsoft", "").replace("Google", "").trim()}
+                                        </option>
+                                    ))}
+                                </select>
+                                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-white/50">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m6 9 6 6 6-6" /></svg>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
-                    {/* Input Bar */}
-                    <form onSubmit={handleSubmit} className="flex gap-2 relative bg-white p-2 rounded-[30px] shadow-lg border border-slate-100 items-center">
+                    {/* Input Bar - Premium Glassmorphism */}
+                    <form onSubmit={handleSubmit} className="flex gap-2 relative bg-white/5 backdrop-blur-xl p-2 rounded-[30px] shadow-2xl border border-white/10 items-center ring-1 ring-white/5 transition-all focus-within:ring-blue-500/50 focus-within:bg-white/10">
                         <input
                             type="text"
                             value={input}
                             onChange={(e) => setInput(e.target.value)}
                             placeholder="Haz tu consulta aquí..."
-                            className="flex-1 bg-transparent border-none px-6 py-3 text-lg focus:ring-0 placeholder:text-slate-400 outline-none"
+                            className="flex-1 bg-transparent border-none px-4 py-3 text-base md:px-6 md:py-4 md:text-lg text-white placeholder-slate-400 focus:ring-0 outline-none font-light min-w-0"
                         />
 
-                        {/* Mic Button overlapping right */}
+                        {/* Mic Button */}
                         <button
                             type="button"
                             onClick={handleVoiceInput}
-                            className={`p-4 rounded-full transition-all duration-300 ${isListening ? 'bg-red-500 hover:bg-red-600 animate-pulse' : 'bg-green-500 hover:bg-green-600'} text-white shadow-md`}
+                            className={`p-3 md:p-4 rounded-full transition-all duration-300 ${isListening ? 'bg-red-500/80 hover:bg-red-600 animate-pulse' : 'bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400'} text-white shadow-lg border border-white/10`}
                         >
                             <Mic size={24} />
                         </button>
 
-                        {/* Send Button (only show if input has text) */}
+                        {/* Send Button */}
                         {input.trim() && (
                             <button
                                 type="submit"
                                 disabled={isLoading}
-                                className="bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-full transition-all shadow-md active:scale-95"
+                                className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white p-3 md:p-4 rounded-full transition-all shadow-lg active:scale-95 border border-white/10"
                             >
                                 <Send size={24} />
                             </button>

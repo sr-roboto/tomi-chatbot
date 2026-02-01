@@ -9,7 +9,7 @@ export default {
             fontFamily: {
                 'serif': ['"DM Serif Display"', 'serif'],
                 'handwriting': ['Quicksand', 'sans-serif'],
-                'sans': ['Quicksand', 'sans-serif'], // Set Quicksand as default sans
+                'sans': ['Quicksand', 'sans-serif'],
             },
             aspectRatio: {
                 '4/5': '4/5',
@@ -23,6 +23,8 @@ export default {
                 'pop-in': 'popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
                 'fade-in': 'fadeIn 0.5s ease-out',
                 'slide-up': 'slideUp 0.5s ease-out',
+                'gradient-xy': 'gradient 15s ease infinite',
+                'pulse-slow': 'pulse 6s cubic-bezier(0.4, 0, 0.6, 1) infinite',
             },
             keyframes: {
                 bounceSlight: {
@@ -57,7 +59,17 @@ export default {
                     'from': { transform: 'translateY(20px)', opacity: '0' },
                     'to': { transform: 'translateY(0)', opacity: '1' },
                 },
-            }
+                gradient: {
+                    '0%, 100%': {
+                        'background-size': '200% 200%',
+                        'background-position': 'left center'
+                    },
+                    '50%': {
+                        'background-size': '200% 200%',
+                        'background-position': 'right center'
+                    },
+                },
+            },
         },
     },
     plugins: [],

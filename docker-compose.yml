@@ -7,21 +7,12 @@ services:
       - ./server/.env
     environment:
       - HOST=0.0.0.0
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - AI_PROVIDER=ollama # Options: ollama, gemini
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - AI_PROVIDER=ollama # Options: ollama, gemini, deepseek
     volumes:
       - ./server/faiss_index_ollama:/app/faiss_index_ollama
       - ./server/faiss_index_gemini:/app/faiss_index_gemini
       - ./server/data:/app/data
-    depends_on:
-      - ollama
-
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
 
   client:
     build: ./client
@@ -29,6 +20,3 @@ services:
       - "80:80"
     depends_on:
       - server
-
-volumes:
-  ollama_data:

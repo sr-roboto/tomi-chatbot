@@ -9,3 +9,7 @@ langchain-google-genai<1.0.0
 pypdf
 faiss-cpu
 python-dotenv
+python-dotenv
+gTTS
+langchain-openai
+fastembed

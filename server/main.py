@@ -5,18 +5,12 @@ import random
 import os
 import time
 from rag_service import rag_service
+from tts_service import tts_service
 
 app = FastAPI()
 
 # Configure CORS
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost",
-    "http://localhost:80",
-    "http://127.0.0.1",
-    "http://127.0.0.1:80",
-]
+origins = ["*"]
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,6 +23,9 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
     subject: str | None = None
+
+class TTSRequest(BaseModel):
+    text: str
 
 class ChatResponse(BaseModel):
     response: str
@@ -69,6 +66,14 @@ async def chat_stream_endpoint(request: ChatRequest):
         rag_service.stream_answer(user_msg), 
         media_type="text/plain"
     )
+
+@app.post("/api/tts")
+def tts_endpoint(request: TTSRequest):
+    audio_buffer = tts_service.generate_audio(request.text)
+    if not audio_buffer:
+        raise HTTPException(status_code=500, detail="TTS Generation failed")
+    
+    return StreamingResponse(audio_buffer, media_type="audio/mpeg")
 
 if __name__ == "__main__":
     import uvicorn
