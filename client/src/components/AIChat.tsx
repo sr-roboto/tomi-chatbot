@@ -379,20 +379,6 @@ const AIChat = () => {
             {/* Main Content Area */}
             <div className="relative z-10 flex-1 flex flex-col items-center justify-center p-4">
 
-                {/* Floating Title (Brand) */}
-                {!showHistory && !input && messages.length < 3 && (
-                    <motion.div
-                        initial={{ opacity: 0, y: -20 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="absolute top-[15%] flex flex-col items-center gap-2 text-center pointer-events-none"
-                    >
-                        <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-teal-500/10 border border-teal-500/20 text-teal-400 text-xs font-semibold tracking-wider uppercase">
-                            <Sparkles size={12} />
-                            IA Educativa v2.0
-                        </div>
-                    </motion.div>
-                )}
-
                 {/* History Overlay */}
                 <AnimatePresence>
                     {showHistory && (
