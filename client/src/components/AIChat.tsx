@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Mic, Volume2, VolumeX, StopCircle, History, X, Home, Sparkles, Brain, GraduationCap } from 'lucide-react';
+import { Send, Mic, Volume2, VolumeX, StopCircle, History, X, Home, Sparkles, Brain, GraduationCap, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -141,6 +141,27 @@ const AIChat = () => {
     const [subtitle, setSubtitle] = useState('');
     const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
     const [manualVoice, setManualVoice] = useState<SpeechSynthesisVoice | null>(null);
+
+    const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+    // PWA Install Prompt Listener
+    useEffect(() => {
+        const handler = (e: any) => {
+            e.preventDefault();
+            setDeferredPrompt(e);
+        };
+        window.addEventListener('beforeinstallprompt', handler);
+        return () => window.removeEventListener('beforeinstallprompt', handler);
+    }, []);
+
+    const handleInstallClick = async () => {
+        if (!deferredPrompt) return;
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+            setDeferredPrompt(null);
+        }
+    };
 
     // Initial Greeting Speech
     useEffect(() => {
@@ -370,7 +391,18 @@ const AIChat = () => {
                 </button>
             </div>
 
-            <div className="absolute top-6 right-6 z-50">
+            <div className="absolute top-6 right-6 z-50 flex items-center gap-3">
+                {/* PWA Install Button (Only visible if installable) */}
+                {deferredPrompt && (
+                    <button
+                        onClick={handleInstallClick}
+                        className="glass-button p-3 rounded-xl flex items-center gap-2 font-display font-medium text-sm bg-teal-500/10 text-teal-300 border-teal-500/30 animate-pulse hover:animate-none"
+                    >
+                        <Download size={20} />
+                        <span className="hidden md:inline">Instalar App</span>
+                    </button>
+                )}
+
                 <button onClick={() => setShowHistory(!showHistory)} className={`glass-button p-3 rounded-xl transition-all ${showHistory ? 'bg-teal-500/20 border-teal-500/50' : ''}`}>
                     {showHistory ? <X size={20} /> : <History size={20} />}
                 </button>
