@@ -34,7 +34,7 @@ docker exec -it ollama ollama pull llama3.2
 echo "------------------------------------------------"
 echo "✅ Deployment Complete!"
 echo "Server is running on port 8000"
-echo "Client is running on port 80"
+
 echo ""
 echo "Stats:"
 docker compose -f docker-compose.vps.yml ps

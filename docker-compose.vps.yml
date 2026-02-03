@@ -40,20 +40,6 @@ services:
     expose:
       - "11434"
 
-  # Frontend (Client)
-  client:
-    build:
-      context: ./client
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    ports:
-      - "80:80"
-    environment:
-      - VITE_API_URL=/api
-    depends_on:
-      - server
-    networks:
-      - tomi-network
 
 volumes:
   ollama_storage:
