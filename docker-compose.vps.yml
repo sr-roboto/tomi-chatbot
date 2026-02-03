@@ -9,11 +9,14 @@ services:
     restart: unless-stopped
     ports:
       - "8000:8000"
+    env_file:
+      - ./server/.env
     environment:
       - APP_ENV=production
       - HOST=0.0.0.0
       - OLLAMA_BASE_URL=http://ollama:11434
-      - AI_PROVIDER=ollama
+      - AI_PROVIDER=gemini
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - PORT=8000
     volumes:
       # Persist FAISS indexes (Vector DB)
@@ -39,7 +42,6 @@ services:
     # Expose port mostly for debugging, internal communication happens via network
     expose:
       - "11434"
-
 
 volumes:
   ollama_storage:
