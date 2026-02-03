@@ -60,7 +60,9 @@ const PedagogicalAvatar = ({ state }: { state: AvatarState }) => {
     useEffect(() => {
         const timer = setTimeout(() => {
             setIsGreeting(false);
-        }, 2500); // Greeting lasts 2.5s
+            // After greeting, ensure we go to frame 5 (Attentive) as requested
+            if (state !== 'speaking') setFrame(5);
+        }, 2000); // Greeting lasts 2s
         return () => clearTimeout(timer);
     }, []);
 
@@ -75,30 +77,24 @@ const PedagogicalAvatar = ({ state }: { state: AvatarState }) => {
 
         // Priority 2: State-based animations
         if (state === 'speaking') {
-            // Sequence: 1 -> 3 -> 2 (Loop)
-            // Occasional 5
+            // Strict Loop: 1 -> 3 -> 2
             let step = 0;
             const sequence = [1, 3, 2];
 
             interval = setInterval(() => {
-                // 10% chance to show frame 5 (nodding/emphasis)
-                if (Math.random() < 0.1) {
-                    setFrame(5);
-                } else {
-                    setFrame(sequence[step % sequence.length]);
-                    step++;
-                }
+                setFrame(sequence[step % sequence.length]);
+                step++;
             }, 180); // Speed of animation
 
         } else if (state === 'thinking') {
-            // Fixed frame 6 as requested
+            // Frame 6 (Thinking)
             setFrame(6);
         } else if (state === 'listening') {
             // Frame 5 (Listening/Attentive)
             setFrame(5);
         } else {
-            // Idle state
-            setFrame(1);
+            // Idle / Finished Speaking -> Frame 5 (Attentive) as requested
+            setFrame(5);
         }
 
         return () => clearInterval(interval);
@@ -169,13 +165,16 @@ const AIChat = () => {
 
             const utterance = new SpeechSynthesisUtterance(cleanText);
 
-            // Smart Voice Selection
+            // Smart Voice Selection via Google Priority
             let selectedVoice: SpeechSynthesisVoice | null | undefined = manualVoice;
             if (!selectedVoice) {
-                // Prefer Female/Neutral Spanish voices for "Pedagogical Assistant" persona (often clearer)
-                selectedVoice = voices.find(v => v.lang.toLowerCase().startsWith('es') && (v.name.includes('Google') || v.name.includes('Microsoft')));
+                // Priority: Google Spanish
+                selectedVoice = voices.find(v => v.lang.toLowerCase().startsWith('es') && v.name.toLowerCase().includes('google'));
             }
-            if (!selectedVoice) selectedVoice = voices.find(v => v.lang.toLowerCase().startsWith('es'));
+            if (!selectedVoice) {
+                // Fallback: Any Spanish
+                selectedVoice = voices.find(v => v.lang.toLowerCase().startsWith('es'));
+            }
 
             if (selectedVoice) {
                 utterance.voice = selectedVoice;
@@ -218,6 +217,12 @@ const AIChat = () => {
     const recognitionRef = useRef<SpeechRecognition | null>(null);
 
     const handleVoiceInput = () => {
+        // Check for HTTPS/Localhost requirement for Web Speech API
+        if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            alert("⚠️ El micrófono requiere conexión segura (HTTPS) para funcionar. \n\nEstás conectado por HTTP inseguro (" + window.location.hostname + "), por lo que el navegador bloquea el micrófono por seguridad. \n\nPruébalo en 'localhost' o configura SSL en el servidor.");
+            return;
+        }
+
         if (isListening) {
             recognitionRef.current?.stop();
             setIsListening(false);
@@ -242,7 +247,16 @@ const AIChat = () => {
                 setTimeout(() => triggerSubmit(transcript), 500);
             };
 
-            recognition.onerror = () => setIsListening(false);
+            recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+                console.error("Speech recognition error", event.error);
+                setIsListening(false);
+                if (event.error === 'not-allowed') {
+                    alert("Permiso de micrófono denegado. Verifica la configuración de tu navegador.");
+                } else if (event.error === 'network') {
+                    alert("Error de red al intentar usar el reconocimiento de voz.");
+                }
+            };
+
             recognition.onend = () => setIsListening(false);
             recognition.start();
         } else {
