@@ -43,6 +43,16 @@ services:
     expose:
       - "11434"
 
+  # Cloudflare Tunnel
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=eyJhIjoiZTZkMGE2ZTgyNzQ5N2ViZTNhZTk1Y2ZhMmUzM2VlNjkiLCJ0IjoiYjk2NzMzYWUtZGFiZC00YjViLTk2ZmYtYTI0YTFlNDI1MjFkIiwicyI6Ik1tVXdZMkV4TVdFdE9ERTJaUzAwT0RNeUxUbGpNbVV0TVRZeE5XSmlPVGd6TXpaaiJ9
+    networks:
+      - tomi-network
+
 volumes:
   ollama_storage:
 
