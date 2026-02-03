@@ -1,3 +1,5 @@
+version: '3.8'
+
 services:
   server:
     build: ./server
@@ -7,16 +9,34 @@ services:
       - ./server/.env
     environment:
       - HOST=0.0.0.0
-      - OLLAMA_BASE_URL=http://host.docker.internal:11434
-      - AI_PROVIDER=ollama # Options: ollama, gemini, deepseek
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - AI_PROVIDER=gemini # Options: ollama, gemini, deepseek
     volumes:
       - ./server/faiss_index_ollama:/app/faiss_index_ollama
-      - ./server/faiss_index_gemini:/app/faiss_index_gemini
+      - ./server/faiss_index_ollama_local:/app/faiss_index_ollama_local
+      - ./server/faiss_index_gemini_local:/app/faiss_index_gemini_local
+      - ./server/faiss_index_deepseek_local:/app/faiss_index_deepseek_local
       - ./server/data:/app/data
-
-  client:
-    build: ./client
-    ports:
-      - "80:80"
     depends_on:
-      - server
+      - ollama
+    networks:
+      - tomi-network
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    container_name: ollama
+    volumes:
+      - ollama_storage:/root/.ollama
+    networks:
+      - tomi-network
+    expose:
+      - "11434"
+
+volumes:
+  ollama_storage:
+
+
+networks:
+  tomi-network:
+    driver: bridge

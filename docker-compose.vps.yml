@@ -15,13 +15,14 @@ services:
       - APP_ENV=production
       - HOST=0.0.0.0
       - OLLAMA_BASE_URL=http://ollama:11434
-      - AI_PROVIDER=ollama
+      - AI_PROVIDER=gemini
       - PORT=8000
     volumes:
       # Persist FAISS indexes (Vector DB)
       # Matching the paths defined in rag_service.py specific to fastembed
-      - ./server/faiss_index_ollama_fastembed:/app/faiss_index_ollama_fastembed
-      - ./server/faiss_index_gemini_fastembed:/app/faiss_index_gemini_fastembed
+      - ./server/faiss_index_ollama_local:/app/faiss_index_ollama_local
+      - ./server/faiss_index_gemini_local:/app/faiss_index_gemini_local
+      - ./server/faiss_index_deepseek_local:/app/faiss_index_deepseek_local
       # Persist raw data (PDFs)
       - ./server/data:/app/data
     depends_on:

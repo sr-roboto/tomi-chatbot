@@ -3,9 +3,8 @@ import time
 import gc
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.chat_models import ChatOllama
-from langchain_openai import ChatOpenAI
-# Add back Google imports for Hybrid support
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
@@ -26,8 +25,8 @@ class RAGService:
         return cls._instance
 
     def _initialize(self):
-        # Determine Provider
-        self.provider = os.getenv("AI_PROVIDER", "gemini").lower()
+        # Determine Provider - Default to OLLAMA
+        self.provider = os.getenv("AI_PROVIDER", "ollama").lower()
         print(f"-------- RAG SERVICE INITIALIZING --------")
         print(f"Active Provider: {self.provider.upper()}")
         
@@ -35,84 +34,57 @@ class RAGService:
         self.qa_chain = None
 
         # --- UNIVERSAL EMBEDDINGS (HuggingFace Local) ---
-        # Standard, robust usage (resolves FastEmbed conflicts)
+        # Optimized for CPU (Quantized/Small models like all-MiniLM-L6-v2)
         print("Initializing HuggingFace Embeddings (Local CPU)...")
         self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
         if self.provider == "gemini":
-            # --- GEMINI DISABLED (User Preference: Local Llama 3.2) ---
-            pass
-        
+            # --- GEMINI CLOUD CONFIGURATION ---
+            api_key = os.getenv("GOOGLE_API_KEY")
+            if not api_key:
+                print("CRITICAL ERROR: GOOGLE_API_KEY is missing for Gemini provider.")
+            
+            print("Connecting to Google Gemini (Flash Lite)...")
+            self.llm = ChatGoogleGenerativeAI(
+                model="gemini-flash-lite-latest", 
+                google_api_key=api_key,
+                temperature=0.3,
+                convert_system_message_to_human=True
+            )
+            self.index_path = "faiss_index_gemini_local"
+
+        elif self.provider == "deepseek":
+            # --- DEEPSEEK API CONFIGURATION ---
+            api_key = os.getenv("DEEPSEEK_API_KEY")
+            if not api_key:
+                print("CRITICAL ERROR: DEEPSEEK_API_KEY is missing.")
+            
+            print("Connecting to DeepSeek API...")
+            self.llm = ChatOpenAI(
+                model="deepseek-chat", 
+                openai_api_key=api_key, 
+                openai_api_base="https://api.deepseek.com",
+                temperature=0.3
+            )
+            self.index_path = "faiss_index_deepseek_local"
+
         elif self.provider == "ollama":
             # --- OLLAMA LOCAL CONFIGURATION ---
-            # Using Llama 3.2 (3B) - Highly optimized for latency
+            # Using Llama 3.2 (3B) - Best balance of Speed vs Intelligence
             base_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
             print(f"Connecting to Ollama at {base_url} with model llama3.2...")
-            from langchain_ollama import ChatOllama
             self.llm = ChatOllama(
                 model="llama3.2",
                 base_url=base_url,
-                temperature=0.1, # Low temperature for faster, deterministic responses
-                keep_alive="5m"  # Keep model relevant in memory
+                temperature=0.1, 
+                keep_alive="5m"
             )
             self.index_path = "faiss_index_ollama_local"
-
-        elif self.provider == "deepseek":
-            # (DeepSeek logic kept as backup)
-            self.api_key = os.getenv("DEEPSEEK_API_KEY")
-            print("Using DeepSeek API (LLM)...")
-            self.llm = ChatOpenAI(
-                model='deepseek-chat', 
-                openai_api_key=self.api_key, 
-                openai_api_base='https://api.deepseek.com',
-                max_tokens=1024
-            )
-            self.index_path = "faiss_index_deepseek_fastembed"
-        
-        elif self.provider == "ollama":
-             # --- OLLAMA LOCAL CONFIGURATION ---
-             self.ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
-             print(f"Connecting to Ollama at {self.ollama_base_url}")
-             
-             # Smartest/Fastest balance: Llama 3.2 (3B)
-             self.llm_model = "llama3.2" 
-             
-             # Attempt to pull the model if not exists (Basic check)
-             try:
-                 import requests
-                 print(f"Checking if model {self.llm_model} is available locally...")
-                 # Check if model exists first to avoid unnecessary pull
-                 tags_response = requests.get(f"{self.ollama_base_url}/api/tags", timeout=3)
-                 
-                 model_exists = False
-                 if tags_response.status_code == 200:
-                    models = [m['name'] for m in tags_response.json().get('models', [])]
-                    # Check for partial match (e.g. llama3.2:latest)
-                    if any(self.llm_model in m for m in models):
-                        print(f"Model {self.llm_model} found locally. Skipping download.")
-                        model_exists = True
-                 
-                 if not model_exists:
-                     print(f"Model {self.llm_model} not found. Triggering pull (this may take a while)...")
-                     # Use a short timeout for the request setup, but let the pull happen in background or warn user
-                     # We verify connection but don't block forever if possible, or we assume user will pull it.
-                     requests.post(f"{self.ollama_base_url}/api/pull", json={"name": self.llm_model}, timeout=10)
-                     
-             except Exception as e:
-                 print(f"Warning: Could not verify/pull model: {e}")
-                 print("If you are using a local Ollama, make sure OLLAMA_HOST=0.0.0.0 is set!")
-
-             self.llm = ChatOllama(
-                 base_url=self.ollama_base_url,
-                 model=self.llm_model,
-                 temperature=0.3
-             )
-             self.index_path = "faiss_index_ollama_fastembed" # Separate index for Ollama-FastEmbed combo
         
         else:
              # Fallback
-             print("Warning: Unknown provider.")
-             self.index_path = "faiss_index_unknown"
+             print(f"Warning: Unknown provider {self.provider}. Defaulting to Ollama settings.")
+             self.index_path = "faiss_index_ollama_local"
 
         print(f"Vector Store Path: {self.index_path}")
         print(f"------------------------------------------")
@@ -136,8 +108,7 @@ class RAGService:
              self._setup_qa_chain()
              return
 
-        # Load processed files tracking - Save in DATA directory so it persists!
-        # Use separate checklist per provider so we don't mix them up
+        # Load processed files tracking
         processed_files_path = os.path.join(directory_path, f"processed_files_{self.provider}.txt")
         processed_files = set()
         if os.path.exists(processed_files_path):
@@ -157,7 +128,7 @@ class RAGService:
             file_path = os.path.join(directory_path, filename)
             print(f"Processing file {index + 1}/{total_files}: {filename}...")
             
-            # Retry loop for this specific file
+            # Retry loop
             max_retries = 3
             success = False
             
@@ -168,7 +139,7 @@ class RAGService:
                     
                     if not docs:
                         print(f"Warning: No text found in {filename}")
-                        success = True # Treat as success to skip next time
+                        success = True
                         break
 
                     # Add to Vector Store
@@ -177,7 +148,7 @@ class RAGService:
                     else:
                         self.vector_store.add_documents(docs)
                     
-                    # Save progress immediately
+                    # Save progress
                     self.vector_store.save_local(self.index_path)
                     
                     # Mark as processed
@@ -191,22 +162,15 @@ class RAGService:
                     del docs
                     del loader
                     gc.collect()
-                    
-                    # Friendly pause to avoid rate limits
-                    time.sleep(10)
+                    time.sleep(1) # Brief pause
                     break 
 
                 except Exception as e:
                     error_str = str(e)
                     print(f"Error processing {filename} (Attempt {attempt+1}): {error_str}")
-                    
-                    # Check for Rate Limit (429)
-                    if "429" in error_str or "ResourceExhausted" in error_str:
-                        wait_time = 70 # Wait slightly longer than the requested 60s
-                        print(f"Rate limit hit. Sleeping for {wait_time} seconds before retrying...")
-                        time.sleep(wait_time)
+                    if "429" in error_str:
+                        time.sleep(30)
                     else:
-                        # General error, wait short time
                         time.sleep(5)
             
             if not success:
@@ -224,18 +188,18 @@ class RAGService:
         template = """Sos un Asistente Pedagógico para Pantallas Táctiles, un experto en tecnología educativa.  
         Tu misión es ayudar a los docentes a integrar esta tecnología en sus clases.
         
-        INSTRUCCIONES DE RESPUESTA:
-        1. Sé CONCISO y VE AL GRANO.
-        2. Usa Markdown para dar formato (Negritas, Listas, Títulos).
-        3. NO escribas párrafos gigantes de texto plano. Usa listas (items) para facilitar la lectura.
-        4. Si la respuesta es larga, divídela en pasos numerados.
+        INSTRUCCIONES:
+        1. Usa el CONTEXTO proporcionado para responder con precisión sobre el uso de la pantalla.
+        2. Si el contexto no es suficiente, USA TU CONOCIMIENTO GENERAL para dar una respuesta útil y educativa.
+        3. Sé CONCISO, AMABLE y VE AL GRANO.
+        4. Usa Markdown para dar formato (Negritas, Listas, Títulos).
         5. SIEMPRE respondé en español.
 
         Contexto: {context}
 
         Pregunta: {question}
 
-        Respuesta (en Markdown y concisa):"""
+        Respuesta (Inteligente y útil):"""
         QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
 
         if self.vector_store:
@@ -270,67 +234,42 @@ class RAGService:
         query_lower = query.lower().strip()
         greetings = ["hola", "buenos dias", "buenas tardes", "buenas noches", "qué tal", "como estas"]
         
-        # Exact match or starts with greeting (simple heuristic)
         is_greeting = any(query_lower.startswith(g) for g in greetings) and len(query_lower) < 20
         
         if is_greeting:
-            # Simple response generator
             response = "¡Hola! Soy tu Asistente Pedagógico para Pantallas Táctiles. ¿En qué puedo ayudarte hoy a integrar la tecnología en tu aula?"
-            # Simulate streaming
             for word in response.split():
                 yield word + " "
                 time.sleep(0.05)
             return
-        # ---------------------------
-
+        
         try:
-            # We need to use the chain slightly differently for streaming
-            # Or use the LLM directly with the context if we want fine-grained control, 
-            # but chain.stream is supported in newer LangChain versions.
-            # However, RetrievalQA might not stream the "result" key easily without newer syntax.
-            # Let's try the modern .stream() method on the chain.
-            
-            # The result of .stream() on RetrievalQA is a stream of dictionaries.
-            # We need to extract the "result" from the final step or tokens from the LLM.
-            
-            # A more robust way with standard RetrievalQA is to use a callback or just standard .stream() 
-            # if the chain supports it. 
-            
-            # Let's try standard .stream() first.
-            for chunk in self.qa_chain.stream({"query": query}):
-                # RetrievalQA stream yields the full result at the end usually, not tokens, 
-                # unless we configured the LLM to stream.
-                
-                # Actually, for true token streaming with RetrievalQA, we often need to construct the chain 
-                # with a specific callback or use the newer LECL (LangChain Expression Language).
-                # But let's try a simpler approach: 
-                # We will manually retrieve docs and then stream the LLM.
-                pass
-
-            # ALTERNATIVE: Manual RAG for Streaming (More reliable for simple setups)
+            # Manual RAG for reliable streaming
             docs = self.vector_store.as_retriever(search_kwargs={"k": 3}).get_relevant_documents(query)
             context = "\n\n".join([doc.page_content for doc in docs])
             
-            prompt = f"""Sos un Asistente Pedagógico para Pantallas Táctiles, un experto en tecnología educativa.  
-            Tu misión es ayudar a los docentes a integrar esta tecnología en sus clases.
+            prompt = f"""Eres un experto Asistente Pedagógico. 
+            Ayuda al docente usando el siguiente contexto y tu propio conocimiento pedagógico.
             
-            INSTRUCCIONES DE RESPUESTA:
-            1. Sé CONCISO y VE AL GRANO.
-            2. Usa Markdown para dar formato (Negritas, Listas, Títulos).
-            3. NO escribas párrafos gigantes de texto plano. Usa listas (items) para facilitar la lectura.
-            4. Si la respuesta es larga, divídela en pasos numerados.
-            5. SIEMPRE respondé en español.
-
-            Contexto: {context}
+            Contexto:
+            {context}
 
             Pregunta: {query}
 
-            Respuesta (en Markdown y concisa):"""
+            Instrucciones:
+            1. PRIORIZA la información del contexto si es relevante.
+            2. Si la respuesta NO está en el contexto, RESPONDE con tu "conocimiento general" (no digas "no sé").
+            3. Sé educativo, práctico y conciso.
+            4. Usa Markdown (listas/negritas).
+            
+            Respuesta:"""
             
             # Stream directly from LLM
             for chunk in self.llm.stream(prompt):
-                # chunk is an AIMessageChunk
-                yield chunk.content
+                if hasattr(chunk, 'content'):
+                    yield chunk.content
+                else:
+                    yield str(chunk)
                 
         except Exception as e:
             yield f"Error generating stream: {str(e)}"
