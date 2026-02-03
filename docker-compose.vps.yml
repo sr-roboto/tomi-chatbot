@@ -25,8 +25,7 @@ services:
       - ./server/faiss_index_deepseek_local:/app/faiss_index_deepseek_local
       # Persist raw data (PDFs)
       - ./server/data:/app/data
-      # Frontend Build (React)
-      - ./dist:/app/dist
+
     depends_on:
       - ollama
     networks:

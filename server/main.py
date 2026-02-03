@@ -79,35 +79,6 @@ def tts_endpoint(request: TTSRequest):
 
     return StreamingResponse(audio_buffer, media_type="audio/mpeg")
 
-# Serve React App (Static Files)
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-
-# Mount the 'assets' folder from the build
-# We assume the 'dist' folder is mounted at /app/dist inside the container
-static_dir = "/app/dist"
-
-if os.path.exists(static_dir):
-    # Mount assets (JS, CSS, Images)
-    app.mount("/assets", StaticFiles(directory=os.path.join(static_dir, "assets")), name="assets")
-
-    # Catch-all route for React Routing (SPA)
-    # This must be the LAST route defined
-    @app.get("/{full_path:path}")
-    async def serve_react_app(full_path: str):
-        # Allow API requests to pass through (if they weren't caught above)
-        if full_path.startswith("api"):
-             raise HTTPException(status_code=404, detail="API endpoint not found")
-        
-        # Determine file path
-        file_path = os.path.join(static_dir, full_path)
-        
-        # If file exists (e.g. favicon.ico), serve it. Otherwise serve index.html
-        if os.path.exists(file_path) and os.path.isfile(file_path):
-            return FileResponse(file_path)
-        
-        return FileResponse(os.path.join(static_dir, "index.html"))
-
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
