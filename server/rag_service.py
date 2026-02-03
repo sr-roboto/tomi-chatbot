@@ -6,7 +6,7 @@ from langchain_community.chat_models import ChatOllama
 from langchain_openai import ChatOpenAI
 # Add back Google imports for Hybrid support
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
 from langchain.docstore.document import Document
@@ -34,10 +34,10 @@ class RAGService:
         self.vector_store = None
         self.qa_chain = None
 
-        # --- UNIVERSAL EMBEDDINGS (FastEmbed) ---
-        # We use FastEmbed for EVERY provider to avoid rate limits and keep it fast/light.
-        print("Initializing FastEmbed (Lightweight CPU Embeddings)...")
-        self.embeddings = FastEmbedEmbeddings()
+        # --- UNIVERSAL EMBEDDINGS (HuggingFace Local) ---
+        # Standard, robust usage (resolves FastEmbed conflicts)
+        print("Initializing HuggingFace Embeddings (Local CPU)...")
+        self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
         if self.provider == "gemini":
             # --- GOOGLE GEMINI CONFIGURATION ---
