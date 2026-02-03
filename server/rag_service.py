@@ -40,14 +40,22 @@ class RAGService:
         self.embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
         if self.provider == "gemini":
-            # --- GOOGLE GEMINI CONFIGURATION ---
-            self.api_key = os.getenv("GOOGLE_API_KEY")
-            if not self.api_key:
-                print("CRITICAL WARNING: GOOGLE_API_KEY not found. Gemini will fail.")
-            
-            print("Using Google Gemini (LLM)...")
-            self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=self.api_key, temperature=0.3)
-            self.index_path = "faiss_index_gemini_fastembed"
+            # --- GEMINI DISABLED (User Preference: Local Llama 3.2) ---
+            pass
+        
+        elif self.provider == "ollama":
+            # --- OLLAMA LOCAL CONFIGURATION ---
+            # Using Llama 3.2 (3B) - Highly optimized for latency
+            base_url = os.getenv("OLLAMA_BASE_URL", "http://ollama:11434")
+            print(f"Connecting to Ollama at {base_url} with model llama3.2...")
+            from langchain_ollama import ChatOllama
+            self.llm = ChatOllama(
+                model="llama3.2",
+                base_url=base_url,
+                temperature=0.1, # Low temperature for faster, deterministic responses
+                keep_alive="5m"  # Keep model relevant in memory
+            )
+            self.index_path = "faiss_index_ollama_local"
 
         elif self.provider == "deepseek":
             # (DeepSeek logic kept as backup)
