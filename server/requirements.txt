@@ -3,13 +3,13 @@ uvicorn
 pydantic
 python-multipart
 google-generativeai
-langchain<0.2.0
-langchain-community<0.1.0
-langchain-google-genai<1.0.0
+langchain
+langchain-community
+langchain-google-genai
 pypdf
 faiss-cpu
 python-dotenv
-python-dotenv
 gTTS
 langchain-openai
+
 fastembed

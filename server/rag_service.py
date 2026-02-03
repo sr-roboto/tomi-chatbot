@@ -46,7 +46,7 @@ class RAGService:
                 print("CRITICAL WARNING: GOOGLE_API_KEY not found. Gemini will fail.")
             
             print("Using Google Gemini (LLM)...")
-            self.llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=self.api_key, temperature=0.3)
+            self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=self.api_key, temperature=0.3)
             self.index_path = "faiss_index_gemini_fastembed"
 
         elif self.provider == "deepseek":
