@@ -540,10 +540,6 @@ const AIChat = () => {
                             )}
                         </AnimatePresence>
                     </motion.form>
-
-                    <div className="text-center">
-                        <p className="text-[10px] text-slate-600 font-medium uppercase tracking-widest">Powered by RAG & Ollama AI</p>
-                    </div>
                 </div>
             </div>
         </div>

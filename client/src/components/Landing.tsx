@@ -15,10 +15,6 @@ const Landing = () => {
                         transition={{ duration: 0.8 }}
                         className="space-y-8"
                     >
-                        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-teal-500/10 border border-teal-500/20 text-teal-300 text-sm font-bold shadow-[0_0_10px_rgba(45,212,191,0.2)]">
-                            <Monitor size={16} />
-                            <span>Innovación Educativa 2.0</span>
-                        </div>
 
                         <h1 className="text-5xl md:text-7xl font-sans font-bold leading-tight text-white">
                             Potencia tu Aula con <br />
