@@ -53,51 +53,65 @@ type AvatarState = 'idle' | 'listening' | 'thinking' | 'speaking';
 
 const PedagogicalAvatar = ({ state }: { state: AvatarState }) => {
     // Animation frame state
-    const [frame, setFrame] = useState(1);
+    const [frame, setFrame] = useState(8); // Start with 8 (Greeting)
+    const [isGreeting, setIsGreeting] = useState(true);
+
+    // Handle Greeting Timer
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setIsGreeting(false);
+        }, 2500); // Greeting lasts 2.5s
+        return () => clearTimeout(timer);
+    }, []);
 
     useEffect(() => {
         let interval: NodeJS.Timeout;
 
+        // Priority 1: Greeting
+        if (isGreeting) {
+            setFrame(8);
+            return;
+        }
+
+        // Priority 2: State-based animations
         if (state === 'speaking') {
-            // Cycle rapidly through speaking frames for realistic lip-sync simulation
-            // Frames: 2, 3, 4 are good for speaking
+            // Sequence: 1 -> 3 -> 2 (Loop)
+            // Occasional 5
+            let step = 0;
+            const sequence = [1, 3, 2];
+
             interval = setInterval(() => {
-                setFrame(prev => {
-                    const next = Math.floor(Math.random() * 3) + 2; // Random frame between 2 and 4
-                    return next;
-                });
-            }, 150);
+                // 10% chance to show frame 5 (nodding/emphasis)
+                if (Math.random() < 0.1) {
+                    setFrame(5);
+                } else {
+                    setFrame(sequence[step % sequence.length]);
+                    step++;
+                }
+            }, 180); // Speed of animation
+
         } else if (state === 'thinking') {
-            // Slow pulse between thinking frames
-            // Frames: 6, 7
-            interval = setInterval(() => {
-                setFrame(prev => (prev === 6 ? 7 : 6));
-            }, 800);
+            // Fixed frame 6 as requested
+            setFrame(6);
         } else if (state === 'listening') {
-            // Attentive pose
+            // Frame 5 (Listening/Attentive)
             setFrame(5);
         } else {
-            // Idle - Tablet 1 (Breathing/Resting)
+            // Idle state
             setFrame(1);
         }
 
         return () => clearInterval(interval);
-    }, [state]);
+    }, [state, isGreeting]);
 
     return (
         <div className="relative w-full h-full flex items-center justify-center animate-float">
-            <AnimatePresence mode="wait">
-                <motion.img
-                    key={frame}
-                    src={`/tablet_${frame}.png`}
-                    alt="AI Pedagogical Avatar"
-                    className="w-full h-full object-contain drop-shadow-[0_20px_50px_rgba(45,212,191,0.3)] relative z-10"
-                    initial={{ opacity: 0.8, scale: 0.98 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0.8 }}
-                    transition={{ duration: 0.2 }}
-                />
-            </AnimatePresence>
+            {/* Removed AnimatePresence/opacity fade to prevent flickering */}
+            <img
+                src={`/tablet_${frame}.png`}
+                alt="AI Pedagogical Avatar"
+                className="w-full h-full object-contain drop-shadow-[0_20px_50px_rgba(45,212,191,0.3)] relative z-10 transition-none" // transition-none important for instant frame swap
+            />
 
             {/* Ambient Glow */}
             <div className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[120%] h-[120%] bg-teal-500/10 rounded-full blur-[100px] transition-opacity duration-500 ${state === 'thinking' ? 'opacity-100 animate-pulse' : 'opacity-40'}`} />
