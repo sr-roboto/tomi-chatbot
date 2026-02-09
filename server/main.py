@@ -6,6 +6,7 @@ import os
 import time
 from rag_service import rag_service
 from tts_service import tts_service
+from community_service import community_service
 
 app = FastAPI()
 
@@ -66,6 +67,25 @@ async def chat_stream_endpoint(request: ChatRequest):
         rag_service.stream_answer(user_msg), 
         media_type="text/plain"
     )
+
+class PostCreate(BaseModel):
+    author: str
+    content: str
+
+@app.get("/api/community/posts")
+def get_posts():
+    return community_service.get_posts()
+
+@app.post("/api/community/posts")
+def create_post(post: PostCreate):
+    return community_service.create_post(post.author, post.content)
+
+@app.post("/api/community/posts/{post_id}/like")
+def like_post(post_id: str):
+    updated_post = community_service.like_post(post_id)
+    if not updated_post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return updated_post
 
 @app.post("/api/tts")
 def tts_endpoint(request: TTSRequest):
