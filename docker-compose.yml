@@ -20,7 +20,8 @@ services:
       - ./server/data:/app/data
     depends_on:
       - ollama
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - tomi-network
 
@@ -43,6 +44,11 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
       - POSTGRES_DB=asistente_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
