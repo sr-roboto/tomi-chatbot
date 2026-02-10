@@ -17,3 +17,6 @@ gTTS
 sentence-transformers
 passlib[bcrypt]
 python-jose[cryptography]
+sqlalchemy
+psycopg2-binary
+email-validator

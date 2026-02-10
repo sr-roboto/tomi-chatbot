@@ -1,52 +1,36 @@
-import json
-import os
 import time
 from typing import List, Dict
+from sqlalchemy.orm import Session, joinedload
+from models import Post, User
 
 class CommunityService:
-    def __init__(self, data_file="community_data.json"):
-        self.data_file = os.path.join(os.path.dirname(__file__), data_file)
-        self.posts = self._load_data()
+    def get_posts(self, db: Session) -> List[Post]:
+        # Return posts sorted by timestamp descending, eager loading author
+        return db.query(Post).options(joinedload(Post.author)).order_by(Post.timestamp.desc()).all()
 
-    def _load_data(self) -> List[Dict]:
-        if not os.path.exists(self.data_file):
-            return []
+    def create_post(self, db: Session, author_id: int, content: str) -> Post:
+        new_post = Post(
+            author_id=author_id,
+            content=content,
+            likes=0
+        )
         try:
-            with open(self.data_file, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            db.add(new_post)
+            db.commit()
+            db.refresh(new_post)
+            return new_post
         except Exception as e:
-            print(f"Error loading community data: {e}")
-            return []
+            db.rollback()
+            print(f"Error creating post: {e}")
+            return None
 
-    def _save_data(self):
-        try:
-            with open(self.data_file, 'w', encoding='utf-8') as f:
-                json.dump(self.posts, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Error saving community data: {e}")
-
-    def get_posts(self) -> List[Dict]:
-        # Return posts sorted by timestamp descending (newest first)
-        return sorted(self.posts, key=lambda x: x['timestamp'], reverse=True)
-
-    def create_post(self, author: str, content: str) -> Dict:
-        new_post = {
-            "id": str(int(time.time() * 1000)), # Simple ID based on timestamp
-            "author": author,
-            "content": content,
-            "timestamp": time.time(),
-            "likes": 0
-        }
-        self.posts.append(new_post)
-        self._save_data()
-        return new_post
-
-    def like_post(self, post_id: str) -> Dict:
-        for post in self.posts:
-            if post['id'] == post_id:
-                post['likes'] += 1
-                self._save_data()
-                return post
+    def like_post(self, db: Session, post_id: int) -> Post:
+        post = db.query(Post).filter(Post.id == post_id).first()
+        if post:
+            post.likes += 1
+            db.commit()
+            db.refresh(post)
+            return post
         return None
 
 # Singleton instance

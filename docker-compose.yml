@@ -11,6 +11,7 @@ services:
       - HOST=0.0.0.0
       - OLLAMA_BASE_URL=http://ollama:11434
       - AI_PROVIDER=gemini # Options: ollama, gemini, deepseek
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/asistente_db
     volumes:
       - ./server/faiss_index_ollama:/app/faiss_index_ollama
       - ./server/faiss_index_ollama_local:/app/faiss_index_ollama_local
@@ -19,6 +20,7 @@ services:
       - ./server/data:/app/data
     depends_on:
       - ollama
+      - postgres
     networks:
       - tomi-network
 
@@ -33,8 +35,24 @@ services:
     expose:
       - "11434"
 
+  postgres:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    container_name: postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=asistente_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - tomi-network
+
 volumes:
   ollama_storage:
+  postgres_data:
 
 
 networks:
