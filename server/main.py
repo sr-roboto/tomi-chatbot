@@ -17,16 +17,16 @@ models.Base.metadata.create_all(bind=engine)
 app = FastAPI()
 
 # Configure CORS
-origins = [
-    "http://localhost:5173",
-    "http://localhost:3000",
-    "https://asistente-pedagogico.netlify.app",
-    "https://window-identifies-insured-richardson.trycloudflare.com",
-]
+# origins = [
+#     "http://localhost:5173",
+#     "http://localhost:3000",
+#     "https://asistente-pedagogico.netlify.app",
+#     "https://window-identifies-insured-richardson.trycloudflare.com",
+# ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
