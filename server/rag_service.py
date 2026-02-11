@@ -185,21 +185,22 @@ class RAGService:
 
     def _setup_qa_chain(self):
         # Custom Prompt Template
-        template = """Sos un Asistente Pedagógico para Pantallas Táctiles, un experto en tecnología educativa.  
-        Tu misión es ayudar a los docentes a integrar esta tecnología en sus clases.
+        template = """Sos un Asistente Pedagógico experto en PANTALLAS TÁCTILES.
+        Tu misión principal es AYUDAR A LOS DOCENTES A INTEGRAR PANTALLAS TÁCTILES EN SU AULA.
+        Estás capacitado específicamente con los manuales, PDFs y documentos de Word proporcionados para este fin.
         
         INSTRUCCIONES:
-        1. Usa el CONTEXTO proporcionado para responder con precisión sobre el uso de la pantalla.
-        2. Si el contexto no es suficiente, USA TU CONOCIMIENTO GENERAL para dar una respuesta útil y educativa.
-        3. Sé CONCISO, AMABLE y VE AL GRANO.
-        4. Usa Markdown para dar formato (Negritas, Listas, Títulos).
-        5. SIEMPRE respondé en español.
+        1. Usa PRIMORDIALMENTE el CONTEXTO proporcionado (manuales y guías) para responder.
+        2. Si el contexto no es suficiente, COMPLEMENTA con tu conocimiento pedagógico general, pero mantén el foco en el uso de la pantalla.
+        3. Sé PRÁCTICO: da ejemplos de actividades, uso de herramientas y consejos de aula.
+        4. Sé amable, paciente y claro.
+        5. Usa Markdown (Negritas, Listas) para estructurar la respuesta.
 
         Contexto: {context}
 
         Pregunta: {question}
 
-        Respuesta (Inteligente y útil):"""
+        Respuesta (Pedagógica y útil):"""
         QA_CHAIN_PROMPT = PromptTemplate.from_template(template)
 
         if self.vector_store:
@@ -216,18 +217,18 @@ class RAGService:
     def get_answer(self, query: str) -> str:
         """Retrieves answer from RAG chain (Synchronous)."""
         if not self.qa_chain:
-            return "I am not initialized with any documents yet. Please add PDF files to the data folder."
+            return "No tengo documentos cargados. Por favor, carga los manuales PDF para que pueda asistirte."
         
         try:
             result = self.qa_chain.invoke({"query": query})
             return result["result"]
         except Exception as e:
-            return f"Error generating answer: {str(e)}"
+            return f"Error al generar respuesta: {str(e)}"
 
     def stream_answer(self, query: str):
         """Generates a streaming answer from the RAG chain."""
         if not self.qa_chain:
-            yield "I am not initialized with any documents yet. Please add PDF files to the data folder."
+            yield "No tengo documentos cargados. Por favor, carga los manuales PDF para que pueda asistirte."
             return
 
         # --- SMART GREETING LOGIC ---
@@ -237,7 +238,7 @@ class RAGService:
         is_greeting = any(query_lower.startswith(g) for g in greetings) and len(query_lower) < 20
         
         if is_greeting:
-            response = "¡Hola! Soy tu Asistente Pedagógico para Pantallas Táctiles. ¿En qué puedo ayudarte hoy a integrar la tecnología en tu aula?"
+            response = "¡Hola! Soy tu Asistente Pedagógico especializado en Pantallas Táctiles. Estoy capacitado con manuales específicos para ayudarte a integrar esta tecnología en tu aula. ¿En qué te puedo ayudar hoy?"
             for word in response.split():
                 yield word + " "
                 time.sleep(0.05)
@@ -248,20 +249,21 @@ class RAGService:
             docs = self.vector_store.as_retriever(search_kwargs={"k": 3}).get_relevant_documents(query)
             context = "\n\n".join([doc.page_content for doc in docs])
             
-            prompt = f"""Eres un experto Asistente Pedagógico. 
-            Ayuda al docente usando el siguiente contexto y tu propio conocimiento pedagógico.
+            prompt = f"""Eres un Asistente Pedagógico experto en PANTALLAS TÁCTILES.
+            Tu objetivo es ayudar a los docentes a integrar esta tecnología en sus clases.
+            Estás capacitado con manuales y documentos específicos (PDFs/Words) para darte soporte.
             
-            Contexto:
+            Contexto (Manuales/Guías):
             {context}
 
-            Pregunta: {query}
+            Pregunta del Docente: {query}
 
             Instrucciones:
-            1. PRIORIZA la información del contexto si es relevante.
-            2. Si la respuesta NO está en el contexto, RESPONDE con tu "conocimiento general" (no digas "no sé").
-            3. Sé educativo, práctico y conciso.
-            4. Usa Markdown (listas/negritas).
-            
+            1. BASA TU RESPUESTA en el contexto proporcionado siempre que sea posible.
+            2. Si la respuesta no está en el manual, usa tu criterio pedagógico para dar una solución práctica.
+            3. SUGIERE actividades o usos concretos de la pantalla.
+            4. Sé conciso pero completo.
+
             Respuesta:"""
             
             # Stream directly from LLM
